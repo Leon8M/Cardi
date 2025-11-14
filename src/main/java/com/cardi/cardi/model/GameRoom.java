@@ -26,6 +26,8 @@ public class GameRoom {
     private boolean questionActive = false;
     private String lastPlayerIdToDraw;
     private String activeSuit; // For Ace card
+    private boolean skipNextTurn = false;
+    private boolean playerHasTakenAction = false;
 
     public GameRoom(String roomCode) {
         this.roomCode = roomCode;
@@ -33,6 +35,13 @@ public class GameRoom {
 
     public void addPlayer(Player player) {
         this.players.add(player);
+    }
+
+    public Player getPlayerById(String playerId) {
+        return this.players.stream()
+                .filter(p -> p.getId().equals(playerId))
+                .findFirst()
+                .orElse(null);
     }
 
     public Card getTopCard() {

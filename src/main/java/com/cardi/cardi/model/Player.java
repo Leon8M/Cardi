@@ -22,8 +22,17 @@ public class Player {
     @Transient
     private List<Card> hand = new ArrayList<>();
     private int wins = 0;
+    @Transient
+    private boolean hasCalledCardi = false;
 
     public Player(String username) {
         this.username = username;
+    }
+
+    public Player(String id, String username) {
+        this.id = id;
+        this.username = username;
+        this.hand = new ArrayList<>();
+        this.wins = 0;
     }
 }

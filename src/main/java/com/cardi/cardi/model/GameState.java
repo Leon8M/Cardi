@@ -15,6 +15,9 @@ public class GameState {
     private Card topCard;
     private int currentPlayerIndex;
     private boolean isReversed;
-    private boolean isGameStarted;
+    private boolean started;
     private String message;
+    private int drawPenalty;
+    private boolean playerHasTakenAction;
+    private String activeSuit;
 }

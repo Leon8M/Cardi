@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cardi! WebSocket Client</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.6.1/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; }
+        div { margin-bottom: 10px; }
+        input[type="text"], button { padding: 8px; margin-right: 5px; border-radius: 4px; border: 1px solid #ccc; }
+        button { cursor: pointer; background-color: #007bff; color: white; border-color: #007bff; }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #cccccc; cursor: not-allowed; }
+        #messages { border: 1px solid #ccc; padding: 10px; height: 150px; overflow-y: scroll; background-color: #e9e9e9; font-family: monospace; }
+        .player-hand { border: 1px solid #ddd; padding: 10px; margin-top: 5px; background-color: #fff; border-radius: 5px; }
+        .card { display: inline-block; border: 1px solid #999; padding: 8px 12px; margin: 3px; border-radius: 5px; background-color: #f0f0f0; cursor: pointer; font-weight: bold; }
+        .card:hover { background-color: #d0e0ff; }
+        .card.selected { border-color: #007bff; box-shadow: 0 0 5px #007bff; }
+        .top-card { font-weight: bold; color: blue; font-size: 1.2em; }
+        .current-player { box-shadow: 0 0 10px 3px yellow; }
+        #turn-indicator { font-size: 1.5em; font-weight: bold; color: green; text-align: center; min-height: 30px; }
+        .cardi-called { color: #ff8c00; font-weight: bold; }
+        #selected-cards-display { margin-top: 10px; padding: 10px; background-color: #e8f0fe; border: 1px solid #b3c8ef; border-radius: 5px; min-height: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Cardi! Game Client</h1>
+
+    <div>
+        <label for="username">Username:</label>
+        <input type="text" id="username" value="Player" />
+        <label for="roomCodeInput">Room Code:</label>
+        <input type="text" id="roomCodeInput" placeholder="Optional" />
+        <button onclick="connect()">Connect</button>
+        <button onclick="disconnect()">Disconnect</button>
+    </div>
+
+    <div id="roomActions" style="display: none;">
+        <button onclick="createRoom()">Create Room</button>
+        <button onclick="joinRoom()">Join Room</button>
+        <button onclick="startGame()">Start Game</button>
+    </div>
+    
+    <hr>
+    <div id="turn-indicator"></div>
+    <hr>
+
+    <div id="game-board" style="display: none;">
+        <h2>Game State:</h2>
+        <div id="gameStateDisplay">
+            <p><strong>Room Code:</strong> <span id="displayRoomCode">N/A</span></p>
+            <p><strong>Game Status:</strong> <span id="displayGameStatus">Not Started</span></p>
+            <p><strong>Current Player:</strong> <span id="displayCurrentPlayer">N/A</span></p>
+            <p><strong>Top Card:</strong> <span id="displayTopCard" class="top-card">N/A</span></p>
+            <p><strong>Draw Penalty:</strong> <span id="displayDrawPenalty" style="color: red; font-weight: bold;">0</span></p>
+            <p><strong>Players:</strong> <div id="displayPlayers"></div></p>
+        </div>
+
+        <div id="gameActions">
+            <div id="selected-cards-display">Selected: None</div>
+            <label for="chosenSuit">Chosen Suit (for Ace):</label>
+            <input type="text" id="chosenSuit" placeholder="e.g., Hearts" />
+            <button id="playCardButton" onclick="playCard()">Play Selected Cards</button>
+            <button id="drawCardButton" onclick="drawCard()">Draw Card</button>
+            <button id="passTurnButton" onclick="passTurn()">Pass Turn</button>
+            <button id="callCardiButton" onclick="callCardi()">Call Cardi!</button>
+        </div>
+    </div>
+
+    <h2>Log:</h2>
+    <div id="messages"></div>
+
+    <script>
+        let stompClient = null;
+        let roomCode = null;
+        let playerId = null;
+        let isMyTurn = false;
+        let selectedCards = [];
+
+        const elements = {
+            messagesDiv: document.getElementById('messages'),
+            usernameInput: document.getElementById('username'),
+            roomCodeInput: document.getElementById('roomCodeInput'),
+            roomActionsDiv: document.getElementById('roomActions'),
+            playCardButton: document.getElementById('playCardButton'),
+            drawCardButton: document.getElementById('drawCardButton'),
+            passTurnButton: document.getElementById('passTurnButton'),
+            callCardiButton: document.getElementById('callCardiButton'),
+            gameBoardDiv: document.getElementById('game-board'),
+            turnIndicator: document.getElementById('turn-indicator'),
+            displayRoomCode: document.getElementById('displayRoomCode'),
+            displayGameStatus: document.getElementById('displayGameStatus'),
+            displayCurrentPlayer: document.getElementById('displayCurrentPlayer'),
+            displayTopCard: document.getElementById('displayTopCard'),
+            displayDrawPenalty: document.getElementById('displayDrawPenalty'),
+            displayPlayers: document.getElementById('displayPlayers'),
+            chosenSuitInput: document.getElementById('chosenSuit'),
+            selectedCardsDisplay: document.getElementById('selected-cards-display'),
+        };
+
+        function logMessage(message, type = 'info') {
+            const p = document.createElement('p');
+            p.style.color = type === 'error' ? 'red' : (type === 'success' ? 'green' : 'black');
+            p.textContent = `[${new Date().toLocaleTimeString()}] [${type.toUpperCase()}] ${message}`;
+            elements.messagesDiv.appendChild(p);
+            elements.messagesDiv.scrollTop = elements.messagesDiv.scrollHeight;
+        }
+
+        function connect() {
+            const socket = new SockJS('http://localhost:8080/ws');
+            stompClient = Stomp.over(socket);
+            stompClient.connect({}, frame => {
+                logMessage('Connected: ' + frame, 'success');
+                elements.roomActionsDiv.style.display = 'block';
+                stompClient.subscribe('/user/queue/errors', message => {
+                    logMessage('Error from server: ' + message.body, 'error');
+                    alert('Invalid Action: ' + message.body);
+                });
+                stompClient.subscribe('/user/queue/room-updates', message => {
+                    logMessage('Received private room update.', 'success');
+                    const state = JSON.parse(message.body);
+                    subscribeToRoom(state.roomCode);
+                });
+            }, error => logMessage('STOMP Error: ' + error, 'error'));
+        }
+
+        function disconnect() {
+            if (stompClient !== null) stompClient.disconnect();
+            logMessage("Disconnected");
+            elements.roomActionsDiv.style.display = 'none';
+            elements.gameBoardDiv.style.display = 'none';
+            roomCode = null; playerId = null; isMyTurn = false; clearSelection();
+        }
+
+        function subscribeToRoom(newRoomCode) {
+            if (roomCode && stompClient) stompClient.unsubscribe(`/topic/game/${roomCode}`);
+            roomCode = newRoomCode;
+            stompClient.subscribe(`/topic/game/${roomCode}`, gameState => {
+                const state = JSON.parse(gameState.body);
+                logMessage('Received Game State Update: ' + state.message);
+                updateGameStateDisplay(state);
+            });
+            logMessage(`Subscribed to /topic/game/${roomCode}`);
+        }
+
+        function selectCard(cardElement, suit, value) {
+            const card = { suit, value };
+            const cardIndex = selectedCards.findIndex(c => c.suit === suit && c.value === value);
+
+            if (cardIndex > -1) {
+                selectedCards.splice(cardIndex, 1);
+                cardElement.classList.remove('selected');
+            } else {
+                selectedCards.push(card);
+                cardElement.classList.add('selected');
+            }
+            updateSelectedCardsDisplay();
+        }
+        
+        function updateSelectedCardsDisplay() {
+            if (selectedCards.length === 0) {
+                elements.selectedCardsDisplay.textContent = 'Selected: None';
+            } else {
+                const cardStrings = selectedCards.map(c => `${c.suit}-${c.value}`);
+                elements.selectedCardsDisplay.textContent = 'Selected: ' + cardStrings.join(', ');
+            }
+        }
+
+        function clearSelection() {
+            selectedCards = [];
+            document.querySelectorAll('.card.selected').forEach(el => el.classList.remove('selected'));
+            updateSelectedCardsDisplay();
+        }
+
+        function updateGameStateDisplay(state) {
+            if (!state.roomCode) {
+                elements.turnIndicator.textContent = state.message;
+                elements.gameBoardDiv.style.display = 'none';
+                return;
+            }
+            clearSelection();
+            elements.gameBoardDiv.style.display = 'block';
+            elements.displayRoomCode.textContent = state.roomCode;
+            elements.displayGameStatus.textContent = state.started ? 'In Progress' : 'Waiting for Players';
+            elements.displayTopCard.textContent = state.topCard ? `${state.topCard.suit}-${state.topCard.value}` : 'None';
+            elements.displayDrawPenalty.textContent = state.drawPenalty || 0;
+
+            const myPlayer = state.players.find(p => p.username === elements.usernameInput.value);
+            if (myPlayer) playerId = myPlayer.id;
+
+            const currentPlayer = state.players[state.currentPlayerIndex];
+            isMyTurn = myPlayer && currentPlayer && myPlayer.id === currentPlayer.id;
+
+            elements.playCardButton.disabled = !isMyTurn || state.playerHasTakenAction;
+            elements.drawCardButton.disabled = !isMyTurn || state.playerHasTakenAction;
+            elements.passTurnButton.disabled = !isMyTurn || !state.playerHasTakenAction;
+            elements.callCardiButton.disabled = !isMyTurn || (myPlayer && myPlayer.hand.length !== 1);
+
+            let turnMessage = isMyTurn ? "It's YOUR turn!" : (currentPlayer ? `${currentPlayer.username}'s turn.` : "Waiting...");
+            elements.drawCardButton.textContent = 'Draw Card';
+
+            const topCard = state.topCard;
+            if (isMyTurn && topCard && (topCard.value === 'Q' || topCard.value === '8') && !state.playerHasTakenAction) {
+                turnMessage += ` You must play a ${topCard.suit} card!`;
+                elements.turnIndicator.style.color = 'orange';
+            } else if (isMyTurn && state.drawPenalty > 0) {
+                turnMessage = `DRAW PENALTY! You must draw ${state.drawPenalty} cards or play a counter.`;
+                elements.turnIndicator.style.color = 'red';
+                elements.drawCardButton.textContent = `Accept Penalty (${state.drawPenalty} cards)`;
+            } else if (isMyTurn && state.activeSuit) {
+                turnMessage += ` (Must play a ${state.activeSuit})`;
+                elements.turnIndicator.style.color = 'blue';
+            }
+            else {
+                elements.turnIndicator.style.color = isMyTurn ? 'green' : 'black';
+            }
+            elements.turnIndicator.textContent = turnMessage;
+
+            elements.displayPlayers.innerHTML = '';
+            state.players.forEach((player, index) => {
+                const playerDiv = document.createElement('div');
+                playerDiv.classList.add('player-hand');
+                if (index === state.currentPlayerIndex && state.started) playerDiv.classList.add('current-player');
+
+                let cardiStatus = player.hasCalledCardi ? `<span class="cardi-called"> (CARDI!)</span>` : '';
+                let handHtml = player.hand.map(card => 
+                    `<span class="card" onclick="selectCard(this, '${card.suit}', '${card.value}')">${card.suit}-${card.value}</span>`
+                ).join('');
+                playerDiv.innerHTML = `<strong>${player.username}</strong>${cardiStatus} - Hand (${player.hand.length} cards): ${handHtml}`;
+                elements.displayPlayers.appendChild(playerDiv);
+            });
+        }
+
+        function createRoom() {
+            if (!stompClient || !stompClient.connected) return logMessage("Not connected.", 'error');
+            stompClient.send("/app/room.create", {}, JSON.stringify({ username: elements.usernameInput.value }));
+        }
+
+        function joinRoom() {
+            if (!stompClient || !stompClient.connected) return logMessage("Not connected.", 'error');
+            const roomCodeToJoin = elements.roomCodeInput.value;
+            stompClient.send("/app/room.join", {}, JSON.stringify({ username: elements.usernameInput.value, roomCode: roomCodeToJoin }));
+            subscribeToRoom(roomCodeToJoin);
+        }
+
+        function startGame() {
+            if (!stompClient || !stompClient.connected || !roomCode) return;
+            stompClient.send("/app/game.start", {}, JSON.stringify({ roomCode }));
+        }
+
+        function playCard() {
+            if (!isMyTurn || selectedCards.length === 0) return;
+            const message = {
+                roomCode,
+                playerId,
+                cards: selectedCards,
+                newSuit: elements.chosenSuitInput.value || null
+            };
+            stompClient.send("/app/game.play", {}, JSON.stringify(message));
+            clearSelection();
+        }
+
+        function drawCard() {
+            if (!isMyTurn) return;
+            stompClient.send("/app/game.draw", {}, JSON.stringify({ roomCode, playerId }));
+        }
+
+        function passTurn() {
+            if (!isMyTurn) return;
+            stompClient.send("/app/game.pass", {}, JSON.stringify({ roomCode, playerId }));
+        }
+
+        function callCardi() {
+            if (!isMyTurn) return;
+            stompClient.send("/app/game.callCardi", {}, JSON.stringify({ roomCode, playerId }));
+        }
+    </script>
+</body>
+</html>
