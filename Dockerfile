@@ -9,7 +9,7 @@ COPY . .
 RUN mvn clean install -DskipTests
 
 # Use a runtime stage with just the JRE for a smaller image
-FROM openjdk:17-jre-slim
+FROM eclipse-temurin:17-jre-jammy
 
 # Copy the built JAR from the build stage
 WORKDIR /app
