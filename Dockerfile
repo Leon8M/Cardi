@@ -1,5 +1,5 @@
 # Use a build stage with Maven and JDK to build the application
-FROM maven:3.8.5-openjdk-17 AS build
+FROM maven:3.9.6-eclipse-temurin-21 AS build
 
 # Copy the source code
 WORKDIR /app
@@ -9,7 +9,7 @@ COPY . .
 RUN mvn clean install -DskipTests
 
 # Use a runtime stage with just the JRE for a smaller image
-FROM eclipse-temurin:17-jre-jammy
+FROM eclipse-temurin:21-jre-jammy
 
 # Copy the built JAR from the build stage
 WORKDIR /app
