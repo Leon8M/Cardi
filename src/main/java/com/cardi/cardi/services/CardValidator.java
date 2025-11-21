@@ -16,6 +16,13 @@ public class CardValidator {
     private static final Set<String> QUESTION_CARDS = Set.of("Q", "8");
     private static final Set<String> COUNTER_CARDS = Set.of("2", "3", "Joker", "J", "K", "A");
 
+    public boolean isQuestionCard(Card card) {
+        if (card == null) {
+            return false;
+        }
+        return QUESTION_CARDS.contains(card.getValue());
+    }
+
     /**
      * Validates if a single card can be played on the current top card.
      *
@@ -27,6 +34,11 @@ public class CardValidator {
     public boolean isValidPlay(Card cardToPlay, Card topCard, GameRoom room) {
         if (cardToPlay == null || topCard == null) {
             return false;
+        }
+
+        // Rule: If top card is a Joker, any card is a valid play (unless there's a penalty)
+        if ("Joker".equals(topCard.getValue())) {
+            return true;
         }
 
         // Rule: If a draw penalty is active, only counter cards are valid.
@@ -50,8 +62,8 @@ public class CardValidator {
             return cardToPlay.getSuit().equals(room.getActiveSuit()) || "A".equals(cardToPlay.getValue());
         }
 
-        // Rule: Handle "Question" cards (Q, 8)
-        if (QUESTION_CARDS.contains(topCard.getValue())) {
+        // Rule: Handle "Question" cards (Q, 8) that set the questionActive flag
+        if (room.isQuestionActive()) {
             return cardToPlay.getSuit().equals(topCard.getSuit()) || "A".equals(cardToPlay.getValue());
         }
 
@@ -73,22 +85,31 @@ public class CardValidator {
      * @param room        The game room.
      * @return True if the multiple-card play is valid.
      */
-    public boolean canPlayMultiple(List<Card> cardsToPlay, Card topCard, GameRoom room) {
-        if (cardsToPlay == null || cardsToPlay.isEmpty()) {
+        public boolean canPlayMultiple(List<Card> cardsToPlay, Card topCard, GameRoom room) {
+            if (cardsToPlay == null || cardsToPlay.isEmpty()) {
+                return false;
+            }
+    
+            // Standard rule: all cards have the same value
+            final String firstValue = cardsToPlay.get(0).getValue();
+            boolean allSameValue = cardsToPlay.stream().allMatch(c -> c.getValue().equals(firstValue));
+    
+            if (allSameValue) {
+                return cardsToPlay.stream().anyMatch(c -> isValidPlay(c, topCard, room));
+            }
+            
+            // Special rule: 8s and Qs of the same suit
+            boolean all8sAndQs = cardsToPlay.stream().allMatch(c -> "8".equals(c.getValue()) || "Q".equals(c.getValue()));
+            if (all8sAndQs) {
+                final String firstSuit = cardsToPlay.get(0).getSuit();
+                boolean allSameSuit = cardsToPlay.stream().allMatch(c -> c.getSuit().equals(firstSuit));
+                if (allSameSuit) {
+                    return cardsToPlay.stream().anyMatch(c -> isValidPlay(c, topCard, room));
+                }
+            }
+    
             return false;
         }
-
-        // Rule: All cards in the list must have the same value.
-        String firstValue = cardsToPlay.get(0).getValue();
-        for (Card card : cardsToPlay) {
-            if (!card.getValue().equals(firstValue)) {
-                return false; // All cards must be of the same number/value
-            }
-        }
-
-        // Rule: The first card in the sequence must be a valid play.
-        return isValidPlay(cardsToPlay.get(0), topCard, room);
-    }
 
     /**
      * Checks if a player is allowed to finish the game with a specific card.

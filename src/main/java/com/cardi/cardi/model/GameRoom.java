@@ -9,6 +9,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 @Data
 public class GameRoom {
     private String roomCode;
+    private String roomOwnerId;
     private List<Player> players = new CopyOnWriteArrayList<>();
     private Stack<Card> drawPile = new Stack<>();
     private Stack<Card> playedPile = new Stack<>();

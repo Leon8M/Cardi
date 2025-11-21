@@ -32,8 +32,9 @@ public class GameController {
      * Handles a user's request to join an existing game room.
      */
     @MessageMapping("/room.join")
-    public void joinRoom(@Payload ActionMessage message) {
-        roomService.joinRoom(message.getRoomCode(), message.getUsername());
+    public void joinRoom(@Payload ActionMessage message, SimpMessageHeaderAccessor headerAccessor) {
+        String sessionId = headerAccessor.getSessionId();
+        roomService.joinRoom(message.getRoomCode(), message.getUsername(), sessionId);
     }
 
     /**

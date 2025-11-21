@@ -36,6 +36,7 @@ public class RoomService {
 
         Player player = new Player(generatePlayerId(), creatorUsername);
         room.addPlayer(player);
+        room.setRoomOwnerId(player.getId()); // Set the room owner
 
         // Send the initial state directly to the creator
         GameState initialState = getGameState(roomCode, "Room created successfully.");
@@ -53,7 +54,7 @@ public class RoomService {
      * @param roomCode The code of the room to join.
      * @param username The username of the player joining.
      */
-    public void joinRoom(String roomCode, String username) {
+    public void joinRoom(String roomCode, String username, String sessionId) {
         GameRoom room = getRoom(roomCode);
         if (room == null) {
             // TODO: Send error back to user that room doesn't exist.
@@ -66,6 +67,22 @@ public class RoomService {
             System.err.println("Attempted to join room that has already started: " + roomCode);
             return;
         }
+        
+        // Handle re-joining
+        if (room.getPlayers().stream().anyMatch(p -> p.getUsername().equalsIgnoreCase(username))) {
+            System.err.println("Player " + username + " is already in room " + roomCode);
+            
+            // Send the current state privately to the re-joining user
+            GameState initialState = getGameState(roomCode, "Re-joined room " + roomCode);
+            SimpMessageHeaderAccessor headerAccessor = SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
+            headerAccessor.setSessionId(sessionId);
+            headerAccessor.setLeaveMutable(true);
+            messagingTemplate.convertAndSendToUser(sessionId, "/queue/room-updates", initialState, headerAccessor.getMessageHeaders());
+
+            // Notify others
+            broadcastGameState(roomCode, username + " re-joined the room.");
+            return;
+        }
 
         if (room.getPlayers().size() >= MAX_PLAYERS) {
             // TODO: Send error back to user that room is full.
@@ -76,6 +93,14 @@ public class RoomService {
         Player player = new Player(generatePlayerId(), username);
         room.addPlayer(player);
 
+        // Send the initial state directly to the joining player
+        GameState initialState = getGameState(roomCode, "Joined room successfully.");
+        SimpMessageHeaderAccessor headerAccessor = SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
+        headerAccessor.setSessionId(sessionId);
+        headerAccessor.setLeaveMutable(true);
+        messagingTemplate.convertAndSendToUser(sessionId, "/queue/room-updates", initialState, headerAccessor.getMessageHeaders());
+        
+        // Broadcast the updated state to everyone in the room
         broadcastGameState(roomCode, username + " has joined the room.");
     }
 
@@ -114,6 +139,7 @@ public class RoomService {
 
         return new GameState(
             room.getRoomCode(),
+            room.getRoomOwnerId(),
             room.getPlayers(),
             room.getTopCard(),
             room.getCurrentPlayerIndex(),
@@ -122,6 +148,7 @@ public class RoomService {
             message,
             room.getDrawPenalty(),
             room.isPlayerHasTakenAction(),
+            room.isQuestionActive(),
             room.getActiveSuit()
         );
     }

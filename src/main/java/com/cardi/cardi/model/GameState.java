@@ -11,6 +11,7 @@ import java.util.List;
 @AllArgsConstructor
 public class GameState {
     private String roomCode;
+    private String roomOwnerId;
     private List<Player> players;
     private Card topCard;
     private int currentPlayerIndex;
@@ -19,5 +20,6 @@ public class GameState {
     private String message;
     private int drawPenalty;
     private boolean playerHasTakenAction;
+    private boolean questionActive;
     private String activeSuit;
 }
