@@ -8,6 +8,8 @@ import jakarta.persistence.Transient;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import lombok.Setter;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -24,6 +26,9 @@ public class Player {
     private int wins = 0;
     @Transient
     private boolean hasCalledCardi = false;
+    @Transient
+    @Setter
+    private String sessionId;
 
     public Player(String username) {
         this.username = username;
@@ -32,6 +37,14 @@ public class Player {
     public Player(String id, String username) {
         this.id = id;
         this.username = username;
+        this.hand = new ArrayList<>();
+        this.wins = 0;
+    }
+
+    public Player(String id, String username, String sessionId) {
+        this.id = id;
+        this.username = username;
+        this.sessionId = sessionId;
         this.hand = new ArrayList<>();
         this.wins = 0;
     }

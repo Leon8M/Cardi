@@ -16,6 +16,7 @@ public class GameEvent {
         GAME_START,
         PLAYER_JOINED,
         PLAYER_LEFT,
+        PLAYER_RECONNECTED,
         CARD_PLAYED,
         CARD_DRAWN,
         TURN_PASSED,

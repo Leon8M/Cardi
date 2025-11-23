@@ -75,6 +75,11 @@ public class GameEventService {
         messagingTemplate.convertAndSend("/topic/game/" + roomCode, event);
     }
 
+    public void sendPlayerReconnected(String roomCode, String username) {
+        GameEvent event = new GameEvent(GameEvent.EventType.PLAYER_RECONNECTED, Map.of("username", username));
+        messagingTemplate.convertAndSend("/topic/game/" + roomCode, event);
+    }
+
     public void sendGameStart(String roomCode, GameState gameState) {
         GameEvent event = new GameEvent(GameEvent.EventType.GAME_START, gameState);
         messagingTemplate.convertAndSend("/topic/game/" + roomCode, event);

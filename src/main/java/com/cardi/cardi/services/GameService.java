@@ -117,7 +117,6 @@ public class GameService {
 
         player.getHand().removeAll(cards);
         room.getPlayedPile().addAll(cards);
-        gameEventService.sendCardPlayed(roomCode, playerId, cards);
 
         if (room.isQuestionActive()) {
             room.setQuestionActive(false);
@@ -150,6 +149,7 @@ public class GameService {
             if (AUTO_ADVANCE_CARDS.contains(card.getValue())) {
                 advanceTurn(room);
                 advanced = true;
+                break; 
             }
         }
 
