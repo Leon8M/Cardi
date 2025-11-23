@@ -1,12 +1,7 @@
 package com.cardi.cardi.services;
 
 import com.cardi.cardi.model.GameRoom;
-import com.cardi.cardi.model.GameState;
 import com.cardi.cardi.model.Player;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
-import org.springframework.messaging.simp.SimpMessageType;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
@@ -19,8 +14,11 @@ public class RoomService {
     private final Map<String, GameRoom> gameRooms = new ConcurrentHashMap<>();
     private static final int MAX_PLAYERS = 6;
 
-    @Autowired
-    private SimpMessagingTemplate messagingTemplate;
+    private final GameEventService gameEventService;
+
+    public RoomService(GameEventService gameEventService) {
+        this.gameEventService = gameEventService;
+    }
 
     /**
      * Creates a new game room, adds the creator as the first player,
@@ -39,13 +37,7 @@ public class RoomService {
         room.setRoomOwnerId(player.getId()); // Set the room owner
 
         // Send the initial state directly to the creator
-        GameState initialState = getGameState(roomCode, "Room created successfully.");
-        
-        SimpMessageHeaderAccessor headerAccessor = SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
-        headerAccessor.setSessionId(sessionId);
-        headerAccessor.setLeaveMutable(true);
-
-        messagingTemplate.convertAndSendToUser(sessionId, "/queue/room-updates", initialState, headerAccessor.getMessageHeaders());
+        gameEventService.sendRoomUpdate(roomCode, sessionId);
     }
 
     /**
@@ -57,36 +49,23 @@ public class RoomService {
     public void joinRoom(String roomCode, String username, String sessionId) {
         GameRoom room = getRoom(roomCode);
         if (room == null) {
-            // TODO: Send error back to user that room doesn't exist.
-            System.err.println("Attempted to join non-existent room: " + roomCode);
+            gameEventService.sendErrorToPlayer(sessionId, "Room not found.");
             return;
         }
 
         if (room.isStarted()) {
-            // TODO: Send error back to user that game has started.
-            System.err.println("Attempted to join room that has already started: " + roomCode);
+            gameEventService.sendErrorToPlayer(sessionId, "Game has already started.");
             return;
         }
         
         // Handle re-joining
         if (room.getPlayers().stream().anyMatch(p -> p.getUsername().equalsIgnoreCase(username))) {
-            System.err.println("Player " + username + " is already in room " + roomCode);
-            
-            // Send the current state privately to the re-joining user
-            GameState initialState = getGameState(roomCode, "Re-joined room " + roomCode);
-            SimpMessageHeaderAccessor headerAccessor = SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
-            headerAccessor.setSessionId(sessionId);
-            headerAccessor.setLeaveMutable(true);
-            messagingTemplate.convertAndSendToUser(sessionId, "/queue/room-updates", initialState, headerAccessor.getMessageHeaders());
-
-            // Notify others
-            broadcastGameState(roomCode, username + " re-joined the room.");
+            gameEventService.sendErrorToPlayer(sessionId, "You are already in this room.");
             return;
         }
 
         if (room.getPlayers().size() >= MAX_PLAYERS) {
-            // TODO: Send error back to user that room is full.
-            System.err.println("Attempted to join full room: " + roomCode);
+            gameEventService.sendErrorToPlayer(sessionId, "Room is full.");
             return;
         }
 
@@ -94,14 +73,10 @@ public class RoomService {
         room.addPlayer(player);
 
         // Send the initial state directly to the joining player
-        GameState initialState = getGameState(roomCode, "Joined room successfully.");
-        SimpMessageHeaderAccessor headerAccessor = SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
-        headerAccessor.setSessionId(sessionId);
-        headerAccessor.setLeaveMutable(true);
-        messagingTemplate.convertAndSendToUser(sessionId, "/queue/room-updates", initialState, headerAccessor.getMessageHeaders());
+        gameEventService.sendRoomUpdate(roomCode, sessionId);
         
         // Broadcast the updated state to everyone in the room
-        broadcastGameState(roomCode, username + " has joined the room.");
+        gameEventService.sendPlayerJoined(roomCode, username);
     }
 
     public GameRoom getRoom(String roomCode) {
@@ -116,7 +91,7 @@ public class RoomService {
             if (room.getPlayers().isEmpty()) {
                 gameRooms.remove(roomCode);
             } else {
-                broadcastGameState(roomCode, username + " has left the room.");
+                gameEventService.sendPlayerLeft(roomCode, username);
             }
         }
     }
@@ -131,30 +106,5 @@ public class RoomService {
 
     private String generatePlayerId() {
         return UUID.randomUUID().toString();
-    }
-
-    private GameState getGameState(String roomCode, String message) {
-        GameRoom room = getRoom(roomCode);
-        if (room == null) return null;
-
-        return new GameState(
-            room.getRoomCode(),
-            room.getRoomOwnerId(),
-            room.getPlayers(),
-            room.getTopCard(),
-            room.getCurrentPlayerIndex(),
-            room.isReversed(),
-            room.isStarted(),
-            message,
-            room.getDrawPenalty(),
-            room.isPlayerHasTakenAction(),
-            room.isQuestionActive(),
-            room.getActiveSuit()
-        );
-    }
-
-    private void broadcastGameState(String roomCode, String message) {
-        GameState state = getGameState(roomCode, message);
-        messagingTemplate.convertAndSend("/topic/game/" + roomCode, state);
     }
 }

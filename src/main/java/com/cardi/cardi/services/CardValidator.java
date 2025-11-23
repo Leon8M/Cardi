@@ -95,7 +95,7 @@ public class CardValidator {
             boolean allSameValue = cardsToPlay.stream().allMatch(c -> c.getValue().equals(firstValue));
     
             if (allSameValue) {
-                return cardsToPlay.stream().anyMatch(c -> isValidPlay(c, topCard, room));
+                return isValidPlay(cardsToPlay.get(0), topCard, room);
             }
             
             // Special rule: 8s and Qs of the same suit
@@ -104,7 +104,7 @@ public class CardValidator {
                 final String firstSuit = cardsToPlay.get(0).getSuit();
                 boolean allSameSuit = cardsToPlay.stream().allMatch(c -> c.getSuit().equals(firstSuit));
                 if (allSameSuit) {
-                    return cardsToPlay.stream().anyMatch(c -> isValidPlay(c, topCard, room));
+                    return isValidPlay(cardsToPlay.get(0), topCard, room);
                 }
             }
     

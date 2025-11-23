@@ -3,23 +3,22 @@ package com.cardi.cardi.services;
 import com.cardi.cardi.model.Card;
 import com.cardi.cardi.model.GameRoom;
 import com.cardi.cardi.model.Player;
+import com.cardi.cardi.model.GameState;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Stack;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -35,7 +34,7 @@ public class GameServiceTests {
     private CardValidator cardValidator;
 
     @Mock
-    private SimpMessagingTemplate messagingTemplate;
+    private GameEventService gameEventService;
 
     @InjectMocks
     private GameService gameService;
@@ -95,6 +94,6 @@ public class GameServiceTests {
         assertEquals(32, testRoom.getDrawPile().size());
         
         // 4. Verify that a game state update was broadcast
-        verify(messagingTemplate, times(1)).convertAndSend(eq("/topic/game/" + ROOM_CODE), any(com.cardi.cardi.model.GameState.class));
+        verify(gameEventService, times(1)).sendGameStart(eq(ROOM_CODE), any(GameState.class));
     }
 }

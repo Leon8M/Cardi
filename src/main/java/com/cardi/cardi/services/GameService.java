@@ -4,10 +4,6 @@ import com.cardi.cardi.model.Card;
 import com.cardi.cardi.model.GameRoom;
 import com.cardi.cardi.model.GameState;
 import com.cardi.cardi.model.Player;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
-import org.springframework.messaging.simp.SimpMessageType;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;
@@ -20,21 +16,21 @@ import java.util.stream.Collectors;
 @Service
 public class GameService {
 
-    @Autowired
-    private RoomService roomService;
-
-    @Autowired
-    private DeckGenerator deckGenerator;
-
-    @Autowired
-    private CardValidator cardValidator;
-
-    @Autowired
-    private SimpMessagingTemplate messagingTemplate;
+    private final RoomService roomService;
+    private final DeckGenerator deckGenerator;
+    private final CardValidator cardValidator;
+    private final GameEventService gameEventService;
 
     private static final int INITIAL_CARDS_PER_PLAYER = 4;
     private static final Random random = new Random();
     private static final Set<String> AUTO_ADVANCE_CARDS = Set.of("2", "3", "Joker", "J", "K", "A");
+
+    public GameService(RoomService roomService, DeckGenerator deckGenerator, CardValidator cardValidator, GameEventService gameEventService) {
+        this.roomService = roomService;
+        this.deckGenerator = deckGenerator;
+        this.cardValidator = cardValidator;
+        this.gameEventService = gameEventService;
+    }
 
 
     public void startGame(String roomCode) {
@@ -76,7 +72,8 @@ public class GameService {
         room.setSkipNextTurn(false);
         room.setPlayerHasTakenAction(false);
 
-        broadcastGameState(roomCode, "Game Started!");
+        GameState initialState = createGameState(room, "Game Started!");
+        gameEventService.sendGameStart(roomCode, initialState);
     }
 
     public void playCards(String roomCode, String playerId, String sessionId, List<Card> cards, String chosenSuit) {
@@ -84,74 +81,83 @@ public class GameService {
         Player player = room.getPlayerById(playerId);
 
         if (!isPlayerTurn(room, player)) {
-            sendErrorToPlayer(sessionId, "It's not your turn.");
+            gameEventService.sendErrorToPlayer(sessionId, "It's not your turn.");
             return;
         }
         
-        // Handle cardless players
         if (player.getHand().isEmpty()) {
-            sendErrorToPlayer(sessionId, "You have no cards to play. You must draw.");
+            gameEventService.sendErrorToPlayer(sessionId, "You have no cards to play. You must draw.");
             return;
         }
 
-        // If a question is not active, and player has already acted, it's an error.
         if (room.isPlayerHasTakenAction() && !room.isQuestionActive()) {
-            sendErrorToPlayer(sessionId, "You have already played this turn. Please pass the turn.");
+            gameEventService.sendErrorToPlayer(sessionId, "You have already played this turn. Please pass the turn.");
             return;
         }
 
         if (!cardValidator.canPlayMultiple(cards, room.getTopCard(), room)) {
-            sendErrorToPlayer(sessionId, "Invalid play. Check the card rules.");
+            gameEventService.sendErrorToPlayer(sessionId, "Invalid play. Check the card rules.");
             return;
         }
 
-        Card playedCard = cards.get(cards.size() - 1);
         
-        // Handle finishing condition: must have called Cardi to win.
         if (player.getHand().size() == cards.size()) {
             if (player.isHasCalledCardi()) {
-                if (!cardValidator.isAllowedToFinishWith(playedCard)) {
-                    sendErrorToPlayer(sessionId, "You cannot finish the game with that card.");
+                if (!cardValidator.isAllowedToFinishWith(cards.get(cards.size() - 1))) {
+                    gameEventService.sendErrorToPlayer(sessionId, "You cannot finish the game with that card.");
                     return;
                 }
-                // WIN CONDITION MET
                 player.getHand().removeAll(cards);
                 room.getPlayedPile().addAll(cards);
                 room.setStarted(false);
-                broadcastWin(roomCode, player.getUsername());
+                gameEventService.sendGameWin(roomCode, player.getUsername());
                 return;
-            } else {
-                // Played last card without calling Cardi. They are now cardless.
-                // This is not an error, the game continues.
             }
         }
 
         player.getHand().removeAll(cards);
         room.getPlayedPile().addAll(cards);
-        
-        // If a question was active, this play is the answer. The action is now complete.
+        gameEventService.sendCardPlayed(roomCode, playerId, cards);
+
         if (room.isQuestionActive()) {
             room.setQuestionActive(false);
-            room.setPlayerHasTakenAction(true);
-        }
-        
-        boolean wasPenaltyActive = room.getDrawPenalty() > 0;
-        processCardEffect(room, playedCard, chosenSuit, wasPenaltyActive);
-        
-        // If the card just played is a Question card, the turn is not over.
-        if (cardValidator.isQuestionCard(playedCard)) {
-            broadcastGameState(roomCode, player.getUsername() + " played a Question card...");
+            room.setPlayerHasTakenAction(true); // Must pass
+            
+            boolean wasPenaltyActive = room.getDrawPenalty() > 0;
+            for (Card card : cards) {
+                processCardEffect(room, card, chosenSuit, wasPenaltyActive);
+            }
+
+            gameEventService.sendGameStateUpdate(roomCode, player.getUsername() + " answered.");
             return;
         }
 
-        // For all other cards, the action is considered done.
-        room.setPlayerHasTakenAction(true);
-
-        if (AUTO_ADVANCE_CARDS.contains(playedCard.getValue())) {
-            advanceTurn(room);
+        boolean isQuestion = cardValidator.isQuestionCard(cards.get(cards.size() - 1));
+        if (isQuestion) {
+            processCardEffect(room, cards.get(cards.size() - 1), chosenSuit, false);
+            room.setPlayerHasTakenAction(false);
+            gameEventService.sendGameStateUpdate(roomCode, player.getUsername() + " played a Question card.");
+            return;
         }
-        
-        broadcastGameState(roomCode, player.getUsername() + " played " + cards.size() + " card(s).");
+
+        boolean wasPenaltyActive = room.getDrawPenalty() > 0;
+        for (Card card : cards) {
+            processCardEffect(room, card, chosenSuit, wasPenaltyActive);
+        }
+
+        boolean advanced = false;
+        for (Card card : cards) {
+            if (AUTO_ADVANCE_CARDS.contains(card.getValue())) {
+                advanceTurn(room);
+                advanced = true;
+            }
+        }
+
+        if (!advanced) {
+            room.setPlayerHasTakenAction(true);
+        }
+
+        gameEventService.sendGameStateUpdate(roomCode, player.getUsername() + " played " + cards.size() + " card(s).");
     }
 
     public void drawCard(String roomCode, String playerId, String sessionId) {
@@ -159,45 +165,47 @@ public class GameService {
         Player player = room.getPlayerById(playerId);
 
         if (!isPlayerTurn(room, player)) {
-            sendErrorToPlayer(sessionId, "It's not your turn.");
+            gameEventService.sendErrorToPlayer(sessionId, "It's not your turn.");
             return;
         }
 
-        // If player has already acted (and not answering a question), it's an error
         if (room.isPlayerHasTakenAction() && !room.isQuestionActive()) {
-            sendErrorToPlayer(sessionId, "You have already played this turn. Please pass the turn.");
+            gameEventService.sendErrorToPlayer(sessionId, "You have already played this turn. Please pass the turn.");
             return;
         }
         
-        // Handle drawing for a question card
         if (room.isQuestionActive()) {
             if (room.getDrawPile().isEmpty()) {
                 replenishDrawPile(room);
             }
-            player.getHand().add(room.getDrawPile().pop());
+            Card drawnCard = room.getDrawPile().pop();
+            player.getHand().add(drawnCard);
             room.setQuestionActive(false);
-            room.setPlayerHasTakenAction(true); // Player has now taken an action, must pass turn.
-            broadcastGameState(roomCode, player.getUsername() + " drew 1 card for the question.");
+            room.setPlayerHasTakenAction(true);
+            advanceTurn(room);
+            gameEventService.sendCardDrawn(roomCode, playerId, 1);
+            gameEventService.sendGameStateUpdate(roomCode, player.getUsername() + " drew 1 card for the question.");
             return;
         }
 
-        // Handle drawing for a cardless player
         if (player.getHand().isEmpty()) {
             if (room.getDrawPile().isEmpty()) {
                 replenishDrawPile(room);
             }
-            player.getHand().add(room.getDrawPile().pop());
-            player.setHasCalledCardi(false); // Reset Cardi call
-            room.setDrawPenalty(0); // Clear any pending penalties
+            Card drawnCard = room.getDrawPile().pop();
+            player.getHand().add(drawnCard);
+            player.setHasCalledCardi(false); 
+            room.setDrawPenalty(0); 
             advanceTurn(room);
-            broadcastGameState(roomCode, player.getUsername() + " was cardless and drew 1 card.");
+            gameEventService.sendCardDrawn(roomCode, playerId, 1);
+            gameEventService.sendGameStateUpdate(roomCode, player.getUsername() + " was cardless and drew 1 card.");
             return;
         }
 
         if (room.getMaxCardsAllowed() != null && player.getHand().size() >= room.getMaxCardsAllowed()) {
-            sendErrorToPlayer(sessionId, "You have reached the maximum number of cards in hand.");
+            gameEventService.sendErrorToPlayer(sessionId, "You have reached the maximum number of cards in hand.");
             room.setPlayerHasTakenAction(true);
-            broadcastGameState(roomCode, player.getUsername() + " cannot draw due to hand size limit.");
+            gameEventService.sendGameStateUpdate(roomCode, player.getUsername() + " cannot draw due to hand size limit.");
             return;
         }
 
@@ -214,7 +222,8 @@ public class GameService {
         room.setDrawPenalty(0);
         
         advanceTurn(room);
-        broadcastGameState(roomCode, player.getUsername() + " drew " + cardsToDraw + " card(s).");
+        gameEventService.sendCardDrawn(roomCode, playerId, cardsToDraw);
+        gameEventService.sendGameStateUpdate(roomCode, player.getUsername() + " drew " + cardsToDraw + " card(s).");
     }
 
     public void callCardi(String roomCode, String playerId, String sessionId) {
@@ -223,7 +232,7 @@ public class GameService {
         if (player == null) return;
 
         player.setHasCalledCardi(true);
-        broadcastGameState(roomCode, player.getUsername() + " has called CARDI!");
+        gameEventService.sendCardiCalled(roomCode, playerId);
     }
     
     public void passTurn(String roomCode, String playerId, String sessionId) {
@@ -231,17 +240,18 @@ public class GameService {
         Player player = room.getPlayerById(playerId);
 
         if (!isPlayerTurn(room, player)) {
-            sendErrorToPlayer(sessionId, "It's not your turn to pass.");
+            gameEventService.sendErrorToPlayer(sessionId, "It's not your turn to pass.");
             return;
         }
 
         if (!room.isPlayerHasTakenAction()) {
-            sendErrorToPlayer(sessionId, "You must play a card before you can pass the turn.");
+            gameEventService.sendErrorToPlayer(sessionId, "You must play a card before you can pass the turn.");
             return;
         }
         
         advanceTurn(room);
-        broadcastGameState(roomCode, player.getUsername() + " passed the turn.");
+        gameEventService.sendTurnPassed(roomCode, playerId);
+        gameEventService.sendGameStateUpdate(roomCode, player.getUsername() + " passed the turn.");
     }
 
     private void processCardEffect(GameRoom room, Card card, String chosenSuit, boolean wasPenaltyActive) {
@@ -262,9 +272,8 @@ public class GameService {
                 room.setReversed(!room.isReversed());
                 break;
             case "A":
-                room.setDrawPenalty(0); // An Ace always cancels the penalty
+                room.setDrawPenalty(0);
                 if (wasPenaltyActive) {
-                    // When countering, suit is determined by card underneath
                     if (room.getPlayedPile().size() > 1) {
                         Card cardUnder = room.getPlayedPile().get(room.getPlayedPile().size() - 2);
                         if (!"Joker".equals(cardUnder.getValue())) {
@@ -272,7 +281,6 @@ public class GameService {
                         }
                     }
                 } else {
-                    // Normal wildcard play
                     if (chosenSuit != null && !chosenSuit.isEmpty()) {
                         room.setActiveSuit(chosenSuit);
                     }
@@ -322,11 +330,9 @@ public class GameService {
         return room.getPlayers().get(room.getCurrentPlayerIndex()).equals(player);
     }
 
-    private void broadcastGameState(String roomCode, String message) {
-        GameRoom room = roomService.getRoom(roomCode);
-        if (room == null) return;
-
-        GameState state = new GameState(
+    private GameState createGameState(GameRoom room, String message) {
+        if (room == null) return null;
+        return new GameState(
             room.getRoomCode(),
             room.getRoomOwnerId(),
             room.getPlayers(),
@@ -340,20 +346,5 @@ public class GameService {
             room.isQuestionActive(),
             room.getActiveSuit()
         );
-        messagingTemplate.convertAndSend("/topic/game/" + roomCode, state);
-    }
-
-    private void broadcastWin(String roomCode, String winnerUsername) {
-        GameRoom room = roomService.getRoom(roomCode);
-        GameState state = new GameState(roomCode, room.getRoomOwnerId(), room.getPlayers(), null, -1, false, false, winnerUsername + " has won the game!", 0, false, false, null);
-        messagingTemplate.convertAndSend("/topic/game/" + roomCode, state);
-    }
-
-    private void sendErrorToPlayer(String sessionId, String message) {
-        if (sessionId == null) return;
-        SimpMessageHeaderAccessor headerAccessor = SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
-        headerAccessor.setSessionId(sessionId);
-        headerAccessor.setLeaveMutable(true);
-        messagingTemplate.convertAndSendToUser(sessionId, "/queue/errors", message, headerAccessor.getMessageHeaders());
     }
 }
