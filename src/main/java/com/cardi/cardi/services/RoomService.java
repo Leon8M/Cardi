@@ -43,17 +43,11 @@ public class RoomService {
 
 
     /**
-
-     * Creates a new game room, adds the creator as the first player,
-
-     * and sends the initial game state directly back to the creator.
-
+     * Kicks off a new game room, crowning the creator as its first glorious ruler.
+     * A welcome party (the initial game state) is sent directly to the creator.
      *
-
-     * @param creatorUsername The username of the player creating the room.
-
-     * @param sessionId The WebSocket session ID of the creator.
-
+     * @param creatorUsername The mastermind behind this new chaos chamber.
+     * @param sessionId The creator's secret handshake with the server.
      */
 
     public void createRoom(String creatorUsername, String sessionId) {
@@ -70,11 +64,11 @@ public class RoomService {
 
         room.addPlayer(player);
 
-        room.setRoomOwnerId(player.getId()); // Set the room owner
+                room.setRoomOwnerId(player.getId()); // The one who starts it all, the grand architect of chaos.
 
 
 
-        // Send the initial state directly to the creator
+                // Let's get this party started, but only for the creator. Shhh, it's a surprise!
 
         gameEventService.sendRoomUpdate(roomCode, sessionId);
 
@@ -83,17 +77,11 @@ public class RoomService {
 
 
     /**
-
-     * Adds a player to an existing game room or reconnects a disconnected player.
-
+     * Lets a player crash an existing game room or sneak back in if they "accidentally" disconnected.
      *
-
-     * @param roomCode The code of the room to join.
-
-     * @param username The username of the player joining.
-
-     * @param sessionId The new session ID of the player.
-
+     * @param roomCode The secret code to the clubhouse.
+     * @param username The player's chosen identity. Will they be a hero or a villain?
+     * @param sessionId The player's new secret handshake.
      */
 
     public void joinRoom(String roomCode, String username, String sessionId) {
@@ -120,15 +108,15 @@ public class RoomService {
 
         if (existingPlayerOpt.isPresent()) {
 
-            // Player with the same name is in the room, treat as a reconnection
+                        // Found 'em! A player with the same name. Let's treat it as a dramatic return.
 
             Player existingPlayer = existingPlayerOpt.get();
 
             existingPlayer.setSessionId(sessionId);
 
-            gameEventService.sendRoomUpdate(roomCode, sessionId); // Send full state to reconnected player
+                        gameEventService.sendRoomUpdate(roomCode, sessionId); // Welcome back, champion! Here's what you missed.
 
-            gameEventService.sendPlayerReconnected(roomCode, username); // Notify others
+                        gameEventService.sendPlayerReconnected(roomCode, username); // Announce the triumphant (or perhaps sheepish) return!
 
             return;
 
@@ -136,7 +124,7 @@ public class RoomService {
 
 
 
-        // If player is not in the room, check if game has started
+                // A true newcomer! But have they missed the boat to chaos?
 
         if (room.isStarted()) {
 
@@ -164,20 +152,54 @@ public class RoomService {
 
 
 
-        // Send the initial state directly to the joining player
+                // Give the fresh recruit the lowdown on the current mayhem.
 
         gameEventService.sendRoomUpdate(roomCode, sessionId);
 
         
 
-        // Broadcast the updated state to everyone in the room
+                // Shout it from the rooftops: a new challenger has appeared!
 
         gameEventService.sendPlayerJoined(roomCode, username);
 
     }
 
+    /**
+     * A player has returned from the void! Let's get them back in the game.
+     *
+     * @param roomCode The room they're trying to get back into.
+     * @param playerId The player's VIP pass.
+     * @param sessionId Their new, updated secret handshake.
+     */
+
+    public void rejoinRoom(String roomCode, String playerId, String sessionId) {
+        GameRoom room = getRoom(roomCode);
+        if (room == null) {
+            gameEventService.sendErrorToPlayer(sessionId, "Room not found.");
+            return;
+        }
+
+        Optional<Player> existingPlayerOpt = room.getPlayers().stream()
+                .filter(p -> p.getId().equals(playerId))
+                .findFirst();
+
+        if (existingPlayerOpt.isPresent()) {
+            Player existingPlayer = existingPlayerOpt.get();
+            existingPlayer.setSessionId(sessionId);
+                        gameEventService.sendRoomUpdate(roomCode, sessionId); // Here's the chaos you left behind.
+                        gameEventService.sendPlayerReconnected(roomCode, existingPlayer.getUsername()); // Look who's back!
+        } else {
+                        gameEventService.sendErrorToPlayer(sessionId, "Player not found. Are you sure you belong here? Intruder!");
+        }
+    }
 
 
+
+    /**
+     * Seeks out a game room by its legendary room code.
+     * @param roomCode The secret key to the room's very existence.
+     * @return The mystical GameRoom object, or null if it's a figment of a player's drunken imagination.
+     */
     public GameRoom getRoom(String roomCode) {
 
         return gameRooms.get(roomCode);
@@ -186,6 +208,10 @@ public class RoomService {
 
 
 
+    /**
+     * Poof! A player vanishes from the room. Did they run out of luck, or just get bored?
+     * If the room becomes an echo chamber of silence, it's promptly closed.
+     */
     public void removePlayer(String roomCode, String playerId) {
 
         GameRoom room = getRoom(roomCode);
@@ -212,6 +238,11 @@ public class RoomService {
 
 
 
+    /**
+     * Crafts a unique, six-character string, a secret handshake for a new room.
+     * Ensures no two rooms share the same destiny (or code).
+     * @return A fresh, never-before-seen room code, ready for adventure!
+     */
     private String generateRoomCode() {
 
         String code;
@@ -228,6 +259,11 @@ public class RoomService {
 
 
 
+    /**
+     * Bestows a shiny, unique ID upon a new player.
+     * Because every hero (or villain) needs a proper identifier.
+     * @return A brand new player ID, fresh from the UUID factory.
+     */
     private String generatePlayerId() {
 
         return UUID.randomUUID().toString();

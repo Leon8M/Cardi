@@ -15,6 +15,11 @@ import java.util.stream.Collectors;
 
 @Service
 public class GameService {
+/**
+ * The grand maestro behind the scenes, orchestrating all the thrilling (and sometimes frustrating)
+ * card game mechanics. This service handles everything from starting a new game to processing
+ * audacious card plays and managing unexpected twists!
+ */
 
     private final RoomService roomService;
     private final DeckGenerator deckGenerator;
@@ -33,6 +38,11 @@ public class GameService {
     }
 
 
+    /**
+     * Kicks off a brand new game, dealing the initial chaos and setting the stage for epic battles!
+     * No turning back once this is called!
+     * @param roomCode The secret arena where this game will unfold.
+     */
     public void startGame(String roomCode) {
         GameRoom room = roomService.getRoom(roomCode);
         if (room == null || room.isStarted()) {
@@ -45,24 +55,25 @@ public class GameService {
         room.setDrawPile(drawPile);
 
         room.getPlayers().forEach(player -> {
-            player.getHand().clear();
-            player.setHasCalledCardi(false);
+            player.getHand().clear(); // Fresh start, no cheating with old cards!
+                                    player.setHasCalledCardi(false); // No "Cardi!" on the first turn!
             for (int i = 0; i < INITIAL_CARDS_PER_PLAYER; i++) {
-                player.getHand().add(room.getDrawPile().pop());
+                player.getHand().add(room.getDrawPile().pop()); // Deal out the initial hand of destiny!
             }
         });
 
         Card topCard;
+        // Make sure the first card isn't one of those pesky restricted ones
         do {
             if (room.getDrawPile().isEmpty()) {
-                replenishDrawPile(room);
+                replenishDrawPile(room); // Uh oh, reshuffle the chaos!
             }
             topCard = room.getDrawPile().pop();
         } while (CardValidator.FINISHING_RESTRICTED_CARDS.contains(topCard.getValue()));
         
         Stack<Card> playedPile = new Stack<>();
         playedPile.push(topCard);
-        room.setPlayedPile(playedPile);
+        room.setPlayedPile(playedPile); // The first card to kick off the mayhem!
 
         room.setStarted(true);
         room.setCurrentPlayerIndex(random.nextInt(room.getPlayers().size()));
@@ -76,6 +87,14 @@ public class GameService {
         gameEventService.sendGameStart(roomCode, initialState);
     }
 
+    /**
+     * A player dares to play one or more cards onto the pile. This is where the magic (or disaster) happens!
+     * @param roomCode The room ID where the card battle is raging.
+     * @param playerId The brave soul attempting the play.
+     * @param sessionId The player's unique session identifier.
+     * @param cards The cards they wish to unleash upon the table.
+     * @param chosenSuit If a wild card is played, the suit declared by the player.
+     */
     public void playCards(String roomCode, String playerId, String sessionId, List<Card> cards, String chosenSuit) {
         GameRoom room = roomService.getRoom(roomCode);
         Player player = room.getPlayerById(playerId);
@@ -120,7 +139,7 @@ public class GameService {
 
         if (room.isQuestionActive()) {
             room.setQuestionActive(false);
-            room.setPlayerHasTakenAction(true); // Must pass
+                        room.setPlayerHasTakenAction(true); // Our hero has made their move, now they *must* pass!
             
             boolean wasPenaltyActive = room.getDrawPenalty() > 0;
             for (Card card : cards) {
@@ -160,6 +179,13 @@ public class GameService {
         gameEventService.sendGameStateUpdate(roomCode, player.getUsername() + " played " + cards.size() + " card(s).");
     }
 
+    /**
+     * A player bravely (or desperately) draws cards from the deck.
+     * This might be a penalty, a consequence of being cardless, or an attempt to find a miracle card!
+     * @param roomCode The room ID where destiny is being tested.
+     * @param playerId The player whose fate hangs in the balance.
+     * @param sessionId The player's unique session identifier.
+     */
     public void drawCard(String roomCode, String playerId, String sessionId) {
         GameRoom room = roomService.getRoom(roomCode);
         Player player = room.getPlayerById(playerId);
@@ -194,7 +220,7 @@ public class GameService {
             }
             Card drawnCard = room.getDrawPile().pop();
             player.getHand().add(drawnCard);
-            player.setHasCalledCardi(false); 
+                        player.setHasCalledCardi(false); // Drawing means you forfeit your "Cardi!" call (for now).
             room.setDrawPenalty(0); 
             advanceTurn(room);
             gameEventService.sendCardDrawn(roomCode, playerId, 1);
